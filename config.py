@@ -80,25 +80,25 @@ def get_enabled_countries() -> List[CountryConfig]:
 
 # Query templates — {tld} gets replaced per country
 DORK_QUERY_TEMPLATES: List[str] = [
-    'site:{tld} "powered by shopify"',
-    'site:{tld} "cdn.shopify.com"',
-    'site:{tld} inurl:myshopify',
-    'site:{tld} "shopify" "add to cart"',
-    'site:{tld} "checkout" "shopify"',
+    'site:{tld} -site:shopify.{tld} "powered by shopify"',
+    'site:{tld} -site:shopify.{tld} "cdn.shopify.com"',
+    'site:{tld} -site:shopify.{tld} inurl:myshopify',
+    'site:{tld} -site:shopify.{tld} "shopify" "add to cart"',
+    'site:{tld} -site:shopify.{tld} "checkout" "shopify"',
 ]
 
 # Niche-specific dork templates for more targeted discovery
 NICHE_DORK_TEMPLATES: List[str] = [
-    'site:{tld} "powered by shopify" "fashion"',
-    'site:{tld} "powered by shopify" "beauty"',
-    'site:{tld} "powered by shopify" "electronics"',
-    'site:{tld} "powered by shopify" "food"',
-    'site:{tld} "powered by shopify" "home"',
-    'site:{tld} "powered by shopify" "jewellery" OR "jewelry"',
-    'site:{tld} "powered by shopify" "clothing"',
-    'site:{tld} "powered by shopify" "health"',
-    'site:{tld} "powered by shopify" "pet"',
-    'site:{tld} "powered by shopify" "sport"',
+    'site:{tld} -site:shopify.{tld} "powered by shopify" "fashion"',
+    'site:{tld} -site:shopify.{tld} "powered by shopify" "beauty"',
+    'site:{tld} -site:shopify.{tld} "powered by shopify" "electronics"',
+    'site:{tld} -site:shopify.{tld} "powered by shopify" "food"',
+    'site:{tld} -site:shopify.{tld} "powered by shopify" "home"',
+    'site:{tld} -site:shopify.{tld} "powered by shopify" "jewellery" OR "jewelry"',
+    'site:{tld} -site:shopify.{tld} "powered by shopify" "clothing"',
+    'site:{tld} -site:shopify.{tld} "powered by shopify" "health"',
+    'site:{tld} -site:shopify.{tld} "powered by shopify" "pet"',
+    'site:{tld} -site:shopify.{tld} "powered by shopify" "sport"',
 ]
 
 # Rate limiting — smaller batches, build up over time (Edge Case 1)
@@ -132,6 +132,10 @@ CONTACT_PAGE_PATHS: List[str] = [
     "/pages/oor-ons",       # Afrikaans "about us"
     "/pages/get-in-touch",
     "/pages/support",
+    "/policies/privacy-policy",
+    "/policies/terms-of-service",
+    "/policies/shipping-policy",
+    "/policies/refund-policy",
 ]
 
 # Rate limits (Edge Case 7: 1-2s delay, max 3 retries, then skip)

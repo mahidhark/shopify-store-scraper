@@ -366,7 +366,7 @@ class TestScrapeStore:
         # Fail twice, succeed third time
         mock_fetch.side_effect = [None, None, self.SHOPIFY_HTML,
                                   # Contact pages return None
-                                  None, None, None, None, None, None, None, None]
+                                  None, None, None, None, None, None, None, None, None, None, None, None]
 
         result = scrape_store("flaky.co.za", use_playwright_fallback=False)
 
@@ -410,3 +410,51 @@ class TestScrapeStoresBatch:
         results = scrape_stores_batch([])
         assert results == []
         mock_scrape.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Image filename / false positive email tests (bug fix)
+# ---------------------------------------------------------------------------
+
+class TestJunkEmailImageFilter:
+    def test_filters_png_filenames(self):
+        assert _is_junk_email("logo_100x@2x.png") is True
+
+    def test_filters_jpg_filenames(self):
+        assert _is_junk_email("product_580x@2x.jpg") is True
+
+    def test_filters_webp_filenames(self):
+        assert _is_junk_email("banner_1400px_580x@2x.webp") is True
+
+    def test_filters_css_filenames(self):
+        assert _is_junk_email("vendors@layout.theme.css") is True
+
+    def test_filters_js_filenames(self):
+        assert _is_junk_email("ecom-swiper@11.js") is True
+
+    def test_filters_shopify_image_pattern(self):
+        assert _is_junk_email("la-rocheposay-antishine-1400px_580x@2x.webp") is True
+
+    def test_filters_xxx_placeholder(self):
+        assert _is_junk_email("xxx@xxx.xxx") is True
+
+    def test_does_not_filter_real_emails(self):
+        assert _is_junk_email("hello@store.co.za") is False
+        assert _is_junk_email("admin@myshop.com") is False
+        assert _is_junk_email("owner@gmail.com") is False
+
+    def test_extract_emails_skips_image_filenames(self):
+        html = '''
+        <p>hello@store.co.za</p>
+        <img src="logo_100x@2x.png">
+        <img src="product_580x@2x.webp">
+        '''
+        results = extract_emails(html)
+        assert len(results) == 1
+        assert results[0].email == "hello@store.co.za"
+
+    def test_extract_emails_skips_xxx_placeholder(self):
+        html = '<p>xxx@xxx.xxx</p><p>real@store.co.za</p>'
+        results = extract_emails(html)
+        assert len(results) == 1
+        assert results[0].email == "real@store.co.za"

@@ -91,8 +91,23 @@ class ScrapeResult:
 # ---------------------------------------------------------------------------
 
 def _is_junk_email(email: str) -> bool:
-    """Check if an email matches junk patterns."""
+    """Check if an email matches junk patterns or is a false positive."""
     email_lower = email.lower()
+
+    # Filter out image/asset filenames matched by email regex
+    # e.g. "logo_100x@2x.png", "photo_580x@2x.webp"
+    image_extensions = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.css', '.js')
+    if any(email_lower.endswith(ext) for ext in image_extensions):
+        return True
+
+    # Filter Shopify image sizing patterns: @2x, _100x, _580x, etc.
+    if '@2x.' in email_lower or re.search(r'_\d+x@', email_lower) or re.search(r'_\d+x\d*\.', email_lower):
+        return True
+
+    # Filter placeholder/test emails
+    if email_lower == 'xxx@xxx.xxx':
+        return True
+
     for pattern in JUNK_EMAIL_PATTERNS:
         if pattern.lower() in email_lower:
             return True

@@ -9,6 +9,8 @@ Usage:
     new_domains = discover_stores()
 """
 
+from dotenv import load_dotenv
+load_dotenv()
 import json
 import os
 import random
@@ -212,27 +214,43 @@ def generate_dork_queries(include_niche: bool = True) -> List[str]:
 def _search_google(query: str, num_results: int = DORK_RESULTS_PER_QUERY) -> List[str]:
     """
     Execute a single Google search and return URLs.
-    
-    Uses the `googlesearch-python` library.
-    Returns list of result URLs (may be empty on rate limit / error).
+    Uses SerpAPI for reliable results from server IPs.
+    Falls back to googlesearch-python if no SERPAPI_KEY set.
     """
-    try:
-        from googlesearch import search
-        results = list(search(
-            query,
-            num_results=num_results,
-            sleep_interval=2,
-            lang="en",
-        ))
-        logger.info(f"Query returned {len(results)} results: {query[:60]}...")
-        return results
-    except ImportError:
-        logger.error("googlesearch-python not installed. Run: pip install googlesearch-python")
-        return []
-    except Exception as e:
-        logger.warning(f"Google search failed for '{query[:60]}...': {e}")
-        return []
+    api_key = os.getenv("SERPAPI_KEY")
 
+    if api_key:
+        try:
+            from serpapi import GoogleSearch
+            params = {
+                "q": query,
+                "num": num_results,
+                "api_key": api_key,
+                "engine": "google",
+            }
+            search = GoogleSearch(params)
+            data = search.get_dict()
+            results = [r["link"] for r in data.get("organic_results", []) if "link" in r]
+            logger.info(f"SerpAPI returned {len(results)} results: {query[:60]}...")
+            return results
+        except ImportError:
+            logger.error("serpapi not installed. Run: pip install google-search-results")
+            return []
+        except Exception as e:
+            logger.warning(f"SerpAPI failed for '{query[:60]}...': {e}")
+            return []
+    else:
+        try:
+            from googlesearch import search
+            results = list(search(query, num_results=num_results, sleep_interval=2, lang="en"))
+            logger.info(f"Query returned {len(results)} results: {query[:60]}...")
+            return results
+        except ImportError:
+            logger.error("googlesearch-python not installed.")
+            return []
+        except Exception as e:
+            logger.warning(f"Google search failed for '{query[:60]}...': {e}")
+            return []
 
 def _extract_domains_from_urls(urls: List[str]) -> List[str]:
     """

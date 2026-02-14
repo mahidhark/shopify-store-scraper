@@ -208,3 +208,17 @@ class TestOutputConfig:
     def test_csv_has_email_verified(self):
         """Reacher integration column exists (filled later)."""
         assert "email_verified" in CSV_COLUMNS
+
+
+class TestContactPagePathsPolicies:
+    def test_policy_pages_included(self):
+        """Bug fix: policy pages often contain emails."""
+        paths_str = " ".join(CONTACT_PAGE_PATHS)
+        assert "privacy-policy" in paths_str
+        assert "terms-of-service" in paths_str
+
+    def test_shipping_policy_included(self):
+        assert "/policies/shipping-policy" in CONTACT_PAGE_PATHS
+
+    def test_refund_policy_included(self):
+        assert "/policies/refund-policy" in CONTACT_PAGE_PATHS

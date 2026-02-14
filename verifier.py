@@ -1,12 +1,11 @@
 """
 Shopify Store Scraper — Email Verifier Module
 ===============================================
-Verify extracted emails using Reacher (self-hosted).
+Verify extracted emails using Reacher CLI (self-hosted).
 SMTP-level verification — checks if mailbox exists without sending.
 
 Prerequisites:
-    Reacher running on VPS via Docker:
-    docker run -p 8080:8080 reacherhq/backend:latest
+    Reacher CLI installed at /usr/local/bin/reacher
 
 Usage:
     from verifier import verify_email, verify_emails_batch
@@ -14,13 +13,13 @@ Usage:
     results = verify_emails_batch(["a@store.co.za", "b@shop.co.za"])
 """
 
+import json
 import logging
-import time
 import os
+import subprocess
+import time
 from dataclasses import dataclass
-from typing import List, Optional, Dict
-
-import requests
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -29,16 +28,15 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-# Reacher API endpoint (self-hosted)
-REACHER_URL: str = os.environ.get("REACHER_URL", "http://localhost:8080")
-REACHER_ENDPOINT: str = f"{REACHER_URL}/v0/check_email"
+REACHER_FROM_EMAIL: str = os.environ.get("REACHER_FROM_EMAIL", "mahi@whatsscale.com")
+REACHER_HELLO_NAME: str = os.environ.get("REACHER_HELLO_NAME", "whatsscale.com")
 
-# Rate limiting — be gentle even with self-hosted
-VERIFY_DELAY: float = 1.0           # Seconds between verifications
-VERIFY_TIMEOUT: int = 30            # Request timeout (SMTP can be slow)
-VERIFY_MAX_RETRIES: int = 2         # Retries per email on failure
-VERIFY_BATCH_PAUSE: float = 5.0     # Pause every N verifications
-VERIFY_BATCH_SIZE: int = 20         # Verifications before pause
+# Rate limiting — be gentle with target SMTP servers
+VERIFY_DELAY: float = 1.0
+VERIFY_TIMEOUT: int = 30
+VERIFY_MAX_RETRIES: int = 2
+VERIFY_BATCH_PAUSE: float = 5.0
+VERIFY_BATCH_SIZE: int = 20
 
 
 # ---------------------------------------------------------------------------
@@ -49,10 +47,10 @@ VERIFY_BATCH_SIZE: int = 20         # Verifications before pause
 class VerifyResult:
     """Email verification result."""
     email: str
-    status: str = "unknown"       # "safe" | "risky" | "invalid" | "unknown"
-    is_reachable: str = "unknown"  # "safe" | "risky" | "invalid" | "unknown"
+    status: str = "unknown"
+    is_reachable: str = "unknown"
     is_disposable: bool = False
-    is_role_account: bool = False  # info@, support@, etc.
+    is_role_account: bool = False
     mx_found: bool = False
     smtp_success: bool = False
     error: str = ""
@@ -64,8 +62,8 @@ class VerifyResult:
 
 def verify_email(email: str) -> VerifyResult:
     """
-    Verify a single email address using Reacher.
-    
+    Verify a single email address using Reacher CLI.
+
     Returns VerifyResult with status:
         - "safe": Mailbox exists, safe to send
         - "risky": Mailbox might exist (catch-all, etc)
@@ -76,15 +74,19 @@ def verify_email(email: str) -> VerifyResult:
 
     for attempt in range(VERIFY_MAX_RETRIES + 1):
         try:
-            resp = requests.post(
-                REACHER_ENDPOINT,
-                json={"to_email": email},
+            proc = subprocess.run(
+                [
+                    "reacher", email,
+                    "--from-email", REACHER_FROM_EMAIL,
+                    "--hello-name", REACHER_HELLO_NAME,
+                ],
+                capture_output=True,
+                text=True,
                 timeout=VERIFY_TIMEOUT,
-                headers={"Content-Type": "application/json"},
             )
 
-            if resp.status_code == 200:
-                data = resp.json()
+            if proc.returncode == 0 and proc.stdout.strip():
+                data = json.loads(proc.stdout)
                 result = _parse_reacher_response(email, data)
                 logger.info(
                     f"  Verified {email}: {result.status} "
@@ -92,23 +94,19 @@ def verify_email(email: str) -> VerifyResult:
                 )
                 return result
 
-            logger.warning(f"  Reacher HTTP {resp.status_code} for {email}")
+            logger.warning(f"  Reacher CLI failed for {email}: {proc.stderr[:100]}")
 
-        except requests.ConnectionError:
-            logger.error(
-                f"  Cannot connect to Reacher at {REACHER_URL}. "
-                f"Is it running? Start with: docker run -p 8080:8080 reacherhq/backend:latest"
-            )
-            result.error = "reacher_unavailable"
+        except FileNotFoundError:
+            logger.error("  Reacher CLI not found. Install reacher binary to /usr/local/bin/reacher")
+            result.error = "reacher_not_installed"
             return result
 
-        except requests.Timeout:
+        except subprocess.TimeoutExpired:
             logger.warning(f"  Reacher timeout for {email} (attempt {attempt + 1})")
 
-        except requests.RequestException as e:
+        except Exception as e:
             logger.warning(f"  Reacher error for {email}: {e}")
 
-        # Retry delay
         if attempt < VERIFY_MAX_RETRIES:
             time.sleep(2)
 
@@ -117,46 +115,33 @@ def verify_email(email: str) -> VerifyResult:
     return result
 
 
+# ---------------------------------------------------------------------------
+# Parse Reacher response
+# ---------------------------------------------------------------------------
+
 def _parse_reacher_response(email: str, data: dict) -> VerifyResult:
-    """
-    Parse Reacher API response into a VerifyResult.
-    
-    Reacher response structure:
-    {
-        "input": "hello@store.co.za",
-        "is_reachable": "safe" | "risky" | "invalid" | "unknown",
-        "misc": {"is_disposable": bool, "is_role_account": bool},
-        "mx": {"accepts_mail": bool, "records": [...]},
-        "smtp": {"can_connect_smtp": bool, "is_deliverable": bool, ...}
-    }
-    """
+    """Parse Reacher JSON output into a VerifyResult."""
     result = VerifyResult(email=email)
 
     try:
-        # Top-level reachability
         result.is_reachable = data.get("is_reachable", "unknown")
 
-        # Map to our status
-        reachable = result.is_reachable
-        if reachable == "safe":
+        if result.is_reachable == "safe":
             result.status = "safe"
-        elif reachable == "risky":
+        elif result.is_reachable == "risky":
             result.status = "risky"
-        elif reachable == "invalid":
+        elif result.is_reachable == "invalid":
             result.status = "invalid"
         else:
             result.status = "unknown"
 
-        # Misc fields
         misc = data.get("misc", {})
         result.is_disposable = misc.get("is_disposable", False)
         result.is_role_account = misc.get("is_role_account", False)
 
-        # MX records
         mx = data.get("mx", {})
         result.mx_found = mx.get("accepts_mail", False)
 
-        # SMTP check
         smtp = data.get("smtp", {})
         result.smtp_success = smtp.get("is_deliverable", False)
 
@@ -169,15 +154,26 @@ def _parse_reacher_response(email: str, data: dict) -> VerifyResult:
 
 
 # ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+
+def _check_reacher_health() -> bool:
+    """Check if Reacher CLI is installed and working."""
+    try:
+        proc = subprocess.run(["reacher", "--version"], capture_output=True, timeout=5)
+        return proc.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Batch verification
 # ---------------------------------------------------------------------------
 
 def verify_emails_batch(emails: List[str]) -> List[VerifyResult]:
     """
     Verify a list of emails with rate limiting.
-    
-    Pauses every VERIFY_BATCH_SIZE emails to avoid overwhelming
-    the SMTP servers we're checking against.
+    Pauses every VERIFY_BATCH_SIZE emails.
     """
     results = []
     total = len(emails)
@@ -185,9 +181,8 @@ def verify_emails_batch(emails: List[str]) -> List[VerifyResult]:
     if not emails:
         return results
 
-    # Quick connectivity check
     if not _check_reacher_health():
-        logger.error("Reacher is not available. Skipping all verifications.")
+        logger.error("Reacher CLI is not available. Skipping all verifications.")
         return [VerifyResult(email=e, status="unknown", error="reacher_unavailable")
                 for e in emails]
 
@@ -197,16 +192,13 @@ def verify_emails_batch(emails: List[str]) -> List[VerifyResult]:
         result = verify_email(email)
         results.append(result)
 
-        # Delay between verifications
         if i < total - 1:
             time.sleep(VERIFY_DELAY)
 
-        # Batch pause
         if (i + 1) % VERIFY_BATCH_SIZE == 0 and i < total - 1:
             logger.info(f"  Batch pause ({VERIFY_BATCH_PAUSE}s)...")
             time.sleep(VERIFY_BATCH_PAUSE)
 
-    # Summary
     safe = sum(1 for r in results if r.status == "safe")
     risky = sum(1 for r in results if r.status == "risky")
     invalid = sum(1 for r in results if r.status == "invalid")
@@ -221,19 +213,6 @@ def verify_emails_batch(emails: List[str]) -> List[VerifyResult]:
 
 
 # ---------------------------------------------------------------------------
-# Health check
-# ---------------------------------------------------------------------------
-
-def _check_reacher_health() -> bool:
-    """Check if Reacher is running and accessible."""
-    try:
-        resp = requests.get(f"{REACHER_URL}/", timeout=5)
-        return resp.status_code == 200
-    except requests.RequestException:
-        return False
-
-
-# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -245,16 +224,11 @@ if __name__ == "__main__":
     )
 
     import argparse
-    parser = argparse.ArgumentParser(description="Verify emails using Reacher")
+    parser = argparse.ArgumentParser(description="Verify emails using Reacher CLI")
     parser.add_argument("emails", nargs="*", help="Emails to verify")
     parser.add_argument("--from-file", type=str,
                         help="Read emails from file (one per line)")
-    parser.add_argument("--reacher-url", type=str, default=REACHER_URL,
-                        help=f"Reacher API URL (default: {REACHER_URL})")
     args = parser.parse_args()
-
-    if args.reacher_url != REACHER_URL:
-        REACHER_ENDPOINT = f"{args.reacher_url}/v0/check_email"
 
     emails = list(args.emails)
     if args.from_file:
