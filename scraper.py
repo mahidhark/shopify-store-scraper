@@ -105,7 +105,8 @@ def _is_junk_email(email: str) -> bool:
         return True
 
     # Filter placeholder/test emails
-    if email_lower == 'xxx@xxx.xxx':
+    junk_exact = ('xxx@xxx.xxx', 'name@email.com', 'monique@email.com', 'admin@example.com', 'email@example.com', 'your@email.com')
+    if email_lower in junk_exact:
         return True
 
     for pattern in JUNK_EMAIL_PATTERNS:
